@@ -173,14 +173,16 @@ object SnapdragonTuner {
         val nCtx = recommendCtx(profile, preset)
         val cache = recommendCacheType(profile, modelBytes, nCtx, preset)
 
-        // OpenCL(Adreno GPU) 后端稳定性开关：
-        //   - llama.cpp 的 FlashAttention 在 OpenCL 后端支持不完整，decode 阶段易原生崩溃
-        //     （这类崩溃发生在 native 层，Java 崩溃处理器抓不到，表现就是"对话闪退"）
-        //   - MTP 投机需要第二个 GPU 上下文（ctx_dft），在 OpenCL 上双 GPU 上下文是高危组合
-        // 因此 GPU(OpenCL) 卸载时关闭 FA、投机降级为纯 CPU 的 ngram（零额外内存）；
-        // 纯 CPU 后端没有这些问题，保持 MTP + FlashAttention 以获得最高速度。
+        // 稳定性开关（重要）：
+        //   1) MTP（多头预测投机）统一降级为 ngram：
+        //      - MTP 需要第二个上下文进程（与主模型共享权重的 MTP 头），在 CPU 路径上
+        //        曾在魔趣/荣耀 MagicOS 设备实测触发 SIGSEGV(空指针 si_addr=0x0) 闪退；
+        //      - 且 MTP 依赖模型自带匹配的 MTP 头权重，缺失/不匹配时会在推理段崩溃。
+        //      ngram 零额外内存、单上下文，是稳定基准；开 MTP 需显式且用户自行验证。
+        //   2) OpenCL(Adreno GPU) 后端关闭 FlashAttention：llama.cpp 的 FA 在 OpenCL
+        //      decode 阶段支持不完整，易 native 崩溃。纯 CPU 后端 FA 成熟，保持开启提速。
         val onOpenCl = profile.openclAvailable
-        val spec = if (onOpenCl) SpecMode.NGRAM else SpecMode.MTP
+        val spec = SpecMode.NGRAM
         val flashAttn = !onOpenCl
 
         return ModelConfig(
