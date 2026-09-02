@@ -107,6 +107,17 @@ jobs:
       - name: Fetch llama.cpp (third_party)
         run: bash ./scripts/fetch-llama-cpp.sh
 
+      # 下载 Khronos OpenCL-Headers（ggml-opencl 后端 find_package(OpenCL) 需要）
+      - name: Install OpenCL headers (Khronos)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/heads/main.tar.gz -o /tmp/opencl-headers.tar.gz
+          rm -rf "$ANDROID_SDK_ROOT/opencl-headers"
+          mkdir -p "$ANDROID_SDK_ROOT/opencl-headers"
+          tar -xzf /tmp/opencl-headers.tar.gz -C "$ANDROID_SDK_ROOT/opencl-headers" --strip-components=1
+          echo "OPENCL_HEADERS_DIR=$ANDROID_SDK_ROOT/opencl-headers" >> "$GITHUB_ENV"
+          ls -l "$ANDROID_SDK_ROOT/opencl-headers/CL/cl.h"
+
       # 在 4 vCPU / 16 GB 限制下收一收 Gradle 内存与并发，避免 OOM
       - name: Tune Gradle for 4 vCPU / 16 GB
         run: |
