@@ -89,7 +89,7 @@ class HttpServer(
     }
 
     // 从字节流逐字节读一行（兼容 \n / \r\n），不破坏后续二进制的 body 字节。
-    private fun readLine(input: InputStream, charset: Charset = StandardCharsets.ISO_8859_1): String? {
+    private fun readLine(input: InputStream): String? {
         val sb = StringBuilder()
         while (true) {
             val b = input.read()
