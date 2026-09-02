@@ -80,6 +80,8 @@ android {
     buildFeatures {
         compose = true
         aidl = true
+        // 生成 BuildConfig.DEBUG_LOG（用 -Plocalmind.debugLog=true 开启详细日志）
+        buildConfig = true
     }
 
     composeOptions {
