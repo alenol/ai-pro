@@ -23,6 +23,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // CI 传 -Plocalmind.debugLog=true 时默认开启详细日志（日志写入 Download/localmodel/）
+        val debugLog = (project.findProperty("localmind.debugLog") as? String) == "true"
+        buildConfigField("boolean", "DEBUG_LOG", debugLog.toString())
+
         externalNativeBuild {
             cmake {
                 // 让 llama.cpp 的 OpenCL 内核以 .cl 源码形式编进 so（见 cpp/CMakeLists.txt）
