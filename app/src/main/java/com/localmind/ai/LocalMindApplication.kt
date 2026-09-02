@@ -2,6 +2,7 @@ package com.localmind.ai
 
 import android.app.Application
 import com.localmind.ai.engine.AppServices
+import com.localmind.ai.util.LogFile
 
 // 应用入口。
 //
@@ -17,7 +18,14 @@ class LocalMindApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        services = AppServices(this)
-        services.init()
+        // 详细日志：构建时开 DEBUG_LOG 才启动（写 Download/localmodel/ 目录）
+        LogFile.init(this, BuildConfig.DEBUG_LOG)
+        try {
+            services = AppServices(this)
+            services.init()
+        } catch (t: Throwable) {
+            LogFile.e("Application", "onCreate init FAILED", t)
+            throw t
+        }
     }
 }
