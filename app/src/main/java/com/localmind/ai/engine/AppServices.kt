@@ -83,8 +83,10 @@ class AppServices(private val ctx: Context) {
             http = s
             httpHost = host
             httpPort = port
+            LogFile.i("AppServices", "HttpServer started: http://$host:$port")
             return true
         }
+        LogFile.e("AppServices", "HttpServer start FAILED: ${s.lastError} (port=$port host=$host)")
         return false
     }
 
