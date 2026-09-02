@@ -1,5 +1,7 @@
 package com.localmind.ai.engine
 
+import android.os.Debug
+import com.localmind.ai.util.LogFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -62,6 +64,12 @@ class ModelRuntime {
         if (handle != 0L) NativeEngine.nativeCancel(handle)
     }
 
+    private fun memMb(): String {
+        val mi = Debug.MemoryInfo()
+        Debug.getMemoryInfo(mi)
+        return "${mi.totalPss / 1024}MB"
+    }
+
     // 阻塞式生成。onToken 在 native 线程被调用，实现里不要做重活。
     suspend fun generate(
         prompt: String,
@@ -75,11 +83,19 @@ class ModelRuntime {
                 nPromptTokens = 0, nGenTokens = 0, promptTps = 0.0, genTps = 0.0,
                 nDrafted = 0, nAccepted = 0, acceptRate = 0.0,
             )
-            NativeEngine.generate(handle, prompt, images, sampler, onToken?.let { sink ->
+            LogFile.i("ModelRuntime", "generate begin: prompt_len=${prompt.length} mem=${memMb()}")
+            val st = NativeEngine.generate(handle, prompt, images, sampler, onToken?.let { sink ->
                 object : TokenSink {
                     override fun onToken(text: String): Boolean = sink(text)
                 }
             })
+            LogFile.i(
+                "ModelRuntime",
+                "generate end: ok=${st.ok} stop=${st.stopReason} n=${st.nGenTokens} " +
+                        "promptTps=${st.promptTps} genTps=${st.genTps} mem=${memMb()}" +
+                        (if (st.error != null) " err=${st.error}" else "")
+            )
+            st
         }
     }
 

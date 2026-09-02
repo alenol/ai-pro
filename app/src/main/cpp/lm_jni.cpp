@@ -21,13 +21,73 @@
 #include <string>
 #include <vector>
 
+#include <csignal>
+#include <cstdio>
+#include <ctime>
+#include <unistd.h>
+#include <fcntl.h>
+
 using namespace localmind;
 using json = nlohmann::json;
 
 static JavaVM * g_vm = nullptr;
 
+// ---------------------------------------------------------------------------
+// Native 崩溃标记。
+//
+// 背景：对话时的闪退发生在 native 层（llama_decode/OpenCL kernel）时，
+// Java 的 UncaughtExceptionHandler 完全抓不到，日志里只会留下"静默消失"。
+// 这里捕获常见致命信号，在崩溃瞬间写一个标记文件，用于区分：
+//   - 出现 native_crash.txt        -> native 层崩溃（可拿到信号号/地址）
+//   - 无标记且日志戛然而止          -> 进程被系统杀死（LMK/OOM），非代码崩溃
+// handler 只使用 async-signal-safe 的 syscall（open/write/close/time），
+// 写完后恢复默认动作并重新 raise，保留系统 tombstone 供进一步分析。
+// ---------------------------------------------------------------------------
+static char g_crash_dir[1024] = {0};
+
+static void localmind_crash_handler(int sig, siginfo_t * info, void *) {
+    int fd = -1;
+    if (g_crash_dir[0] != '\0') {
+        char path[1152];
+        const int plen = snprintf(path, sizeof(path), "%s/native_crash.txt", g_crash_dir);
+        if (plen > 0) fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    }
+
+    char buf[512];
+    const int n = snprintf(
+        buf, sizeof(buf),
+        "time=%ld pid=%ld sig=%d si_code=%d si_addr=%p\n",
+        (long) time(nullptr), (long) getpid(), sig,
+        (info && info->si_code) ? info->si_code : -1,
+        (info) ? info->si_addr : nullptr);
+    if (n > 0) {
+        if (fd >= 0) write(fd, buf, (size_t) n);
+    }
+    if (fd >= 0) close(fd);
+
+    // 恢复默认处理并重新触发，保留系统 tombstone / crash report
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(sig, &sa, nullptr);
+    raise(sig);
+}
+
+static void install_crash_handlers() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = localmind_crash_handler;
+    sa.sa_flags     = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    for (int sig : { SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE }) {
+        sigaction(sig, &sa, nullptr);
+    }
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM * vm, void *) {
     g_vm = vm;
+    install_crash_handlers();
     return JNI_VERSION_1_6;
 }
 
@@ -200,6 +260,7 @@ Java_com_localmind_ai_engine_NativeEngine_nativeGenerate(
     auto * engine = (Engine *) (intptr_t) handle;
 
     std::string text = jstr(env, prompt);
+    LM_LOGI("generate begin: prompt_len=%zu", text.size());
 
     json jp = paramsJson ? json::parse(jstr(env, paramsJson), nullptr, false)
                          : json::object();
@@ -270,6 +331,9 @@ Java_com_localmind_ai_engine_NativeEngine_nativeGenerate(
     }
 
     const GenStats & st = engine->stats();
+    LM_LOGI("generate end: ok=%d stop=%s n_prompt=%d n_gen=%d prompt_tps=%.1f gen_tps=%.1f",
+            ok, st.stop_reason.c_str(), st.n_prompt_tokens, st.n_gen_tokens,
+            st.prompt_tps, st.gen_tps);
     json r;
     r["ok"]             = ok;
     if (!err.empty()) r["error"] = err;
@@ -389,6 +453,19 @@ Java_com_localmind_ai_engine_NativeEngine_nativeEmbedDim(JNIEnv *, jclass, jlong
 // ---------------------------------------------------------------------------
 // 运行时探测
 // ---------------------------------------------------------------------------
+
+// 设置 native 崩溃标记文件的输出目录并安装信号捕获（幂等）。
+// 由 App 启动时调用；目录通常为 getExternalFilesDir(null)。
+JNIEXPORT void JNICALL
+Java_com_localmind_ai_engine_NativeEngine_nativeEnableCrashTrace(
+        JNIEnv * env, jclass, jstring dir) {
+    const std::string d = jstr(env, dir);
+    if (!d.empty()) {
+        snprintf(g_crash_dir, sizeof(g_crash_dir), "%s", d.c_str());
+    }
+    install_crash_handlers();
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_localmind_ai_engine_NativeEngine_nativeProbe(JNIEnv * env, jclass) {
     RuntimeInfo ri = probe_runtime();

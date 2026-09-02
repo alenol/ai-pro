@@ -45,6 +45,11 @@ class AppServices(private val ctx: Context) {
         LogFile.i("AppServices", "init begin")
         runCatching {
             runtime.init()
+            // native 崩溃标记：设在应用专属外部目录，native 层崩溃时写 native_crash.txt
+            val crashDir = ctx.getExternalFilesDir(null)?.absolutePath
+                ?: ctx.filesDir.absolutePath
+            runCatching { NativeEngine.nativeEnableCrashTrace(crashDir) }
+                .onFailure { LogFile.w("AppServices", "enableCrashTrace failed: $it") }
         }.onFailure {
             LogFile.e("AppServices", "runtime.init FAILED", it)
         }
@@ -69,6 +74,13 @@ class AppServices(private val ctx: Context) {
                 it.copy(draftPath = draftPath, specMode = SpecMode.DRAFT_MODEL)
             else it
         }
+        LogFile.i(
+            "AppServices",
+            "loadModel cfg: gpuLayers=${cfg.nGpuLayers} flash=${cfg.flashAttn} " +
+                    "spec=${cfg.specMode} ctx=${cfg.nCtx} batch=${cfg.nBatch} " +
+                    "ubatch=${cfg.nUbatch} threads=${cfg.nThreads}/${cfg.nThreadsBatch} " +
+                    "cache=${cfg.cacheTypeK}/${cfg.cacheTypeV}"
+        )
         return runtime.load(cfg).onSuccess {
             currentModelId = fileName(path)
             LogFile.i("AppServices", "model loaded: $currentModelId")

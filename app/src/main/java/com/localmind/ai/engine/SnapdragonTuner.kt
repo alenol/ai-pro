@@ -173,6 +173,16 @@ object SnapdragonTuner {
         val nCtx = recommendCtx(profile, preset)
         val cache = recommendCacheType(profile, modelBytes, nCtx, preset)
 
+        // OpenCL(Adreno GPU) 后端稳定性开关：
+        //   - llama.cpp 的 FlashAttention 在 OpenCL 后端支持不完整，decode 阶段易原生崩溃
+        //     （这类崩溃发生在 native 层，Java 崩溃处理器抓不到，表现就是"对话闪退"）
+        //   - MTP 投机需要第二个 GPU 上下文（ctx_dft），在 OpenCL 上双 GPU 上下文是高危组合
+        // 因此 GPU(OpenCL) 卸载时关闭 FA、投机降级为纯 CPU 的 ngram（零额外内存）；
+        // 纯 CPU 后端没有这些问题，保持 MTP + FlashAttention 以获得最高速度。
+        val onOpenCl = profile.openclAvailable
+        val spec = if (onOpenCl) SpecMode.NGRAM else SpecMode.MTP
+        val flashAttn = !onOpenCl
+
         return ModelConfig(
             modelPath = modelPath,
             mmprojPath = mmprojPath,
@@ -182,14 +192,14 @@ object SnapdragonTuner {
             nGpuLayers = recommendGpuLayers(profile, modelBytes, preset),
             nThreads = recommendThreads(profile, preset),
             nThreadsBatch = recommendBatchThreads(profile),
-            flashAttn = true,
+            flashAttn = flashAttn,
             cacheTypeK = cache,
             cacheTypeV = cache,
-            specMode = SpecMode.MTP,
+            specMode = spec,
             specNMax = if (preset == PerfPreset.SPEED) 24 else 16,
             specNMin = 4,
             specPMin = 0.75f,
-            loadMtp = true,
+            loadMtp = spec == SpecMode.MTP,   // 仅 MTP 才需要加载 MTP 头权重
         )
     }
 
@@ -206,7 +216,7 @@ object SnapdragonTuner {
         }
 
         out += if (profile.openclAvailable) {
-            "GPU 后端：${profile.gpuName}，卸载层数 ${cfg.nGpuLayers}"
+            "GPU 后端：${profile.gpuName}，卸载层数 ${cfg.nGpuLayers}（OpenCL 下已关闭 FlashAttention/MTP 以保证稳定）"
         } else {
             "未检测到 OpenCL 设备，将纯 CPU 推理（速度会明显下降）"
         }

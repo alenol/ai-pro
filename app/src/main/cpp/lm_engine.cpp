@@ -379,6 +379,10 @@ bool Engine::generate(const std::string & prompt,
 
     if (!I.ctx) { err = "模型未加载"; return false; }
 
+    LM_LOGI("generate begin: prompt_len=%zu gpu_layers=%d flash=%d spec=%d ctx=%d ubatch=%d",
+            prompt.size(), I.cfg.n_gpu_layers, (int) I.cfg.flash_attn,
+            (int) I.cfg.spec_mode, I.cfg.n_ctx, I.cfg.n_ubatch);
+
     cancelled_.store(false);
     stats_ = GenStats{};
 

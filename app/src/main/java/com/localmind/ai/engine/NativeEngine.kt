@@ -175,6 +175,10 @@ object NativeEngine {
     external fun nativeUnload(handle: Long)
     external fun nativeCancel(handle: Long)
 
+    // 设置 native 崩溃标记目录并安装信号捕获（启动早期调用一次）。
+    // 崩溃时会在该目录写 native_crash.txt，用于区分 native 层崩溃与系统杀进程。
+    external fun nativeEnableCrashTrace(dir: String)
+
     external fun nativeGenerate(
         handle: Long,
         prompt: String,
