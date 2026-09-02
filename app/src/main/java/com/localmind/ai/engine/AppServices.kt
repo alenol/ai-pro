@@ -7,6 +7,7 @@ import com.localmind.ai.api.OpenAiRoutes
 import com.localmind.ai.rag.Embedder
 import com.localmind.ai.rag.HybridRetriever
 import com.localmind.ai.rag.KnowledgeDb
+import com.localmind.ai.util.LogFile
 import kotlinx.coroutines.runBlocking
 
 // 应用级服务容器。
@@ -41,7 +42,13 @@ class AppServices(private val ctx: Context) {
     private var httpPort = 0
 
     fun init() {
-        runtime.init()
+        LogFile.i("AppServices", "init begin")
+        runCatching {
+            runtime.init()
+        }.onFailure {
+            LogFile.e("AppServices", "runtime.init FAILED", it)
+        }
+        LogFile.i("AppServices", "init done")
     }
 
     // ---------------------------------------------------------------------
@@ -62,7 +69,12 @@ class AppServices(private val ctx: Context) {
                 it.copy(draftPath = draftPath, specMode = SpecMode.DRAFT_MODEL)
             else it
         }
-        return runtime.load(cfg).onSuccess { currentModelId = fileName(path) }
+        return runtime.load(cfg).onSuccess {
+            currentModelId = fileName(path)
+            LogFile.i("AppServices", "model loaded: $currentModelId")
+        }.onFailure {
+            LogFile.e("AppServices", "model load FAILED: $path", it)
+        }
     }
 
     fun unloadModel() {
