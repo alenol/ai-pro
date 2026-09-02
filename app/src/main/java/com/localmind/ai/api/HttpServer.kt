@@ -6,9 +6,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -88,6 +88,17 @@ class HttpServer(
         serverSocket = null
     }
 
+    // 从字节流逐字节读一行（兼容 \n / \r\n），不破坏后续二进制的 body 字节。
+    private fun readLine(input: InputStream, charset: Charset = StandardCharsets.ISO_8859_1): String? {
+        val sb = StringBuilder()
+        while (true) {
+            val b = input.read()
+            if (b == -1) return if (sb.isEmpty()) null else sb.toString()
+            if (b == '\n'.code) return sb.toString()
+            if (b != '\r'.code) sb.append(b.toChar())
+        }
+    }
+
     private suspend fun acceptLoop() {
         val ss = serverSocket ?: return
         while (scope.isActive && !ss.isClosed) {
@@ -105,10 +116,10 @@ class HttpServer(
     private suspend fun handleClient(client: Socket) {
         try {
             withContext(Dispatchers.IO) { client.soTimeout = 0 }
-            val reader = BufferedReader(InputStreamReader(client.getInputStream(), StandardCharsets.ISO_8859_1))
+            val input = BufferedInputStream(client.getInputStream(), 32 * 1024)
             val rawOut = BufferedOutputStream(client.getOutputStream(), 32 * 1024)
 
-            val requestLine = reader.readLine() ?: return
+            val requestLine = readLine(input) ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
 
@@ -118,7 +129,7 @@ class HttpServer(
             // 解析 header
             val headers = HashMap<String, String>()
             var line: String?
-            while (reader.readLine().also { line = it } != null) {
+            while (readLine(input).also { line = it } != null) {
                 if (line.isNullOrEmpty()) break
                 val idx = line!!.indexOf(':')
                 if (idx > 0) {
@@ -133,7 +144,7 @@ class HttpServer(
                     val buf = ByteArray(len)
                     var read = 0
                     while (read < len) {
-                        val n = reader.read(buf, read, len - read)
+                        val n = input.read(buf, read, len - read)
                         if (n < 0) break
                         read += n
                     }
