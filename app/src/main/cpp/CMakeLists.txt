@@ -79,7 +79,7 @@ set(GGML_QNN OFF CACHE BOOL "" FORCE)
 # 而 FindOpenCL 默认只搜桌面标准路径，在 Android NDK 环境下找不到：
 #   - 头文件：CI 工作流已预下载 Khronos OpenCL-Headers（OPENCL_HEADERS_DIR），
 #     否则回退到 NDK sysroot 自带的 CL/ 头（若存在）。
-#   - 库：链接 NDK platforms 下的 libOpenCL.so stub；
+#   - 库：优先使用 CI 生成的空 libOpenCL.so stub（OPENCL_LIBRARY）；
 #     运行时由设备系统（Adreno）加载真正的 /system/lib64/libOpenCL.so。
 # ==========================================================================
 if(DEFINED ENV{OPENCL_HEADERS_DIR})
@@ -89,11 +89,11 @@ if(DEFINED ENV{OPENCL_HEADERS_DIR})
 elseif(DEFINED ANDROID_NDK AND EXISTS "${ANDROID_NDK}/sysroot/usr/include/CL/cl.h")
     set(OpenCL_INCLUDE_DIR "${ANDROID_NDK}/sysroot/usr/include")
 endif()
-if(DEFINED ANDROID_NDK)
-    # NDK r23+ 的 stub 库位于 sysroot/usr/lib/<triple>/<api>/ 下，
-    # 老结构在 platforms/android-*/arch-<abi>/usr/lib/ 下，两者都兜底匹配。
+if(DEFINED ENV{OPENCL_LIBRARY} AND EXISTS "$ENV{OPENCL_LIBRARY}")
+    set(OpenCL_LIBRARY "$ENV{OPENCL_LIBRARY}")
+elseif(DEFINED ANDROID_NDK)
+    # NDK 老结构兜底：platforms/android-*/arch-<abi>/usr/lib 下的 stub（新 NDK 已移除）
     file(GLOB _lm_ocl_libs
-        "${ANDROID_NDK}/toolchains/llvm/prebuilt/*/sysroot/usr/lib/*/*/libOpenCL.so"
         "${ANDROID_NDK}/platforms/android-*/arch-${ANDROID_ABI}/usr/lib/libOpenCL.so")
     if(_lm_ocl_libs)
         list(GET _lm_ocl_libs 0 OpenCL_LIBRARY)
