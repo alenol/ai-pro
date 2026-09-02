@@ -107,23 +107,38 @@ jobs:
       - name: Fetch llama.cpp (third_party)
         run: bash ./scripts/fetch-llama-cpp.sh
 
-      # 下载 Khronos OpenCL-Headers（ggml-opencl 后端 find_package(OpenCL) 需要）
-      # 并用 NDK 编译一个空 libOpenCL.so stub：Android NDK 不提供 OpenCL 库，
-      # 运行时由设备系统（Adreno）/system/lib64/libOpenCL.so 解析。
-      - name: Install OpenCL headers and lib stub (Khronos)
+      # 下载 Khronos OpenCL-Headers（ggml-opencl 后端 find_package(OpenCL) 需要），
+      # 并从头文件提取全部 cl* 函数名，编译一个导出符号的空 stub libOpenCL.so 供链接。
+      # 该 stub 只骗过链接器；APK 不打包它，运行时由设备系统（Adreno）的
+      # /system/lib64/libOpenCL.so 解析（DT_NEEDED=libOpenCL.so）。
+      - name: Install OpenCL headers and build symbol stub (Khronos)
         run: |
           set -euo pipefail
+          HDRS="$ANDROID_SDK_ROOT/opencl-headers"
           curl -fsSL https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/heads/main.tar.gz -o /tmp/opencl-headers.tar.gz
-          rm -rf "$ANDROID_SDK_ROOT/opencl-headers"
-          mkdir -p "$ANDROID_SDK_ROOT/opencl-headers"
-          tar -xzf /tmp/opencl-headers.tar.gz -C "$ANDROID_SDK_ROOT/opencl-headers" --strip-components=1
-          echo "OPENCL_HEADERS_DIR=$ANDROID_SDK_ROOT/opencl-headers" >> "$GITHUB_ENV"
-          ls -l "$ANDROID_SDK_ROOT/opencl-headers/CL/cl.h"
+          rm -rf "$HDRS"
+          mkdir -p "$HDRS"
+          tar -xzf /tmp/opencl-headers.tar.gz -C "$HDRS" --strip-components=1
+          echo "OPENCL_HEADERS_DIR=$HDRS" >> "$GITHUB_ENV"
+          ls -l "$HDRS/CL/cl.h"
+          # 提取 OpenCL API 函数名（cl 后接大写字母的标识符），生成空实现 stub 源文件
+          cd "$HDRS"
+          python3 - <<'PY'
+import re, glob
+names = set()
+for h in glob.glob("CL/*.h"):
+    text = open(h, encoding="utf-8", errors="ignore").read()
+    names.update(m.group(1) for m in re.finditer(r"\b(cl[A-Z][A-Za-z0-9_]*)\s*\(", text))
+with open("opencl_stub.c", "w") as f:
+    for n in sorted(names):
+        f.write('__attribute__((visibility("default"))) void *%s(void) { return 0; }\n' % n)
+print("stubbed %d symbols" % len(names))
+PY
           NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
           CLANG="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-          "$CLANG" -shared -fPIC -x c /dev/null -o "$ANDROID_SDK_ROOT/libOpenCL-stub.so"
-          echo "OPENCL_LIBRARY=$ANDROID_SDK_ROOT/libOpenCL-stub.so" >> "$GITHUB_ENV"
-          ls -l "$ANDROID_SDK_ROOT/libOpenCL-stub.so"
+          "$CLANG" -shared -fPIC -O1 -Wl,-soname,libOpenCL.so -o "$ANDROID_SDK_ROOT/libOpenCL.so" "$HDRS/opencl_stub.c"
+          echo "OPENCL_LIBRARY=$ANDROID_SDK_ROOT/libOpenCL.so" >> "$GITHUB_ENV"
+          ls -l "$ANDROID_SDK_ROOT/libOpenCL.so"
 
       # 在 4 vCPU / 16 GB 限制下收一收 Gradle 内存与并发，避免 OOM
       - name: Tune Gradle for 4 vCPU / 16 GB
