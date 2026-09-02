@@ -90,7 +90,10 @@ elseif(DEFINED ANDROID_NDK AND EXISTS "${ANDROID_NDK}/sysroot/usr/include/CL/cl.
     set(OpenCL_INCLUDE_DIR "${ANDROID_NDK}/sysroot/usr/include")
 endif()
 if(DEFINED ANDROID_NDK)
+    # NDK r23+ 的 stub 库位于 sysroot/usr/lib/<triple>/<api>/ 下，
+    # 老结构在 platforms/android-*/arch-<abi>/usr/lib/ 下，两者都兜底匹配。
     file(GLOB _lm_ocl_libs
+        "${ANDROID_NDK}/toolchains/llvm/prebuilt/*/sysroot/usr/lib/*/*/libOpenCL.so"
         "${ANDROID_NDK}/platforms/android-*/arch-${ANDROID_ABI}/usr/lib/libOpenCL.so")
     if(_lm_ocl_libs)
         list(GET _lm_ocl_libs 0 OpenCL_LIBRARY)
