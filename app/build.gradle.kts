@@ -9,13 +9,14 @@ val arm64Only = (project.findProperty("localmind.arm64Only") as? String) == "tru
 
 android {
     namespace = "com.localmind.ai"
-    compileSdk = 35
+    // 目标系统 Android 16 (API 36)：compileSdk/targetSdk 对齐到 36
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.localmind.ai"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
+        targetSdk = 36
+        versionCode = 2
         versionName = "1.0"
 
         // 骁龙8 Gen5 用 NDK 27 系列，支持 C++17、KleidiAI

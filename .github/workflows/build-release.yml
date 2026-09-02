@@ -56,12 +56,13 @@ jobs:
           java-version: "17"
 
       # 安装 SDK cmdline-tools 并自动接受许可协议，再装所需组件
+      # Android 16 = platform 36；NDK 27 的 stub 编译仍用 android35-clang（NDK 27 无 android36-clang，且 stub 不打包进 APK）
       - name: Install Android SDK, NDK 27, CMake
         uses: android-actions/setup-android@v3
         with:
           packages: >-
-            platforms;android-35
-            build-tools;35.0.0
+            platforms;android-36
+            build-tools;36.0.0
             ndk;27.0.12077973
             cmake;3.22.1
 
