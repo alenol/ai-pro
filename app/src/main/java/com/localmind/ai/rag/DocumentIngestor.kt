@@ -44,7 +44,7 @@ class DocumentIngestor(
                 mime.startsWith("image/") ->
                     ingestImage(uri, name, onProgress)
                 else ->
-                    ingestText(name, uri.toString(), readText(uri), onProgress)
+                    ingestText(name, uri.toString(), readText(uri), onProgress).getOrThrow()
             }
         }
     }
