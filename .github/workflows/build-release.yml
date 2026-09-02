@@ -124,16 +124,16 @@ jobs:
           # 提取 OpenCL API 函数名（cl 后接大写字母的标识符），生成空实现 stub 源文件
           cd "$HDRS"
           python3 - <<'PY'
-import re, glob
-names = set()
-for h in glob.glob("CL/*.h"):
-    text = open(h, encoding="utf-8", errors="ignore").read()
-    names.update(m.group(1) for m in re.finditer(r"\b(cl[A-Z][A-Za-z0-9_]*)\s*\(", text))
-with open("opencl_stub.c", "w") as f:
-    for n in sorted(names):
-        f.write('__attribute__((visibility("default"))) void *%s(void) { return 0; }\n' % n)
-print("stubbed %d symbols" % len(names))
-PY
+          import re, glob
+          names = set()
+          for h in glob.glob("CL/*.h"):
+              text = open(h, encoding="utf-8", errors="ignore").read()
+              names.update(m.group(1) for m in re.finditer(r"\b(cl[A-Z][A-Za-z0-9_]*)\s*\(", text))
+          with open("opencl_stub.c", "w") as f:
+              for n in sorted(names):
+                  f.write('__attribute__((visibility("default"))) void *%s(void) { return 0; }\n' % n)
+          print("stubbed %d symbols" % len(names))
+          PY
           NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
           CLANG="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           "$CLANG" -shared -fPIC -O1 -Wl,-soname,libOpenCL.so -o "$ANDROID_SDK_ROOT/libOpenCL.so" "$HDRS/opencl_stub.c"
