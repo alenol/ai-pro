@@ -112,7 +112,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // 捆绑完整 SQLite（含 FTS5）到 APK，规避荣耀/部分 ROM 系统 SQLite 缺 FTS5 模块的问题
-    implementation("com.github.requery:sqlite-android:3.50.4")
+    // 版本用 jitpack 已发布的 3.49.0（3.50.4 尚未在 jitpack 构建发布）
+    implementation("com.github.requery:sqlite-android:3.49.0")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
