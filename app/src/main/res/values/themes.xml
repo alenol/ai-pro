@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 兼容框架层的主题（启动 Activity / 通知小图标等）。
+         Compose 界面本身用 LocalMindTheme 自定义配色，这里只用系统 DayNight 兜底。 -->
+    <style name="Theme.LocalMind" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

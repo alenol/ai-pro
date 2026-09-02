@@ -1,0 +1,18 @@
+# 构建产物
+.gradle/
+build/
+app/build/
+*.apk
+*.aar
+
+# 第三方源码（由 scripts/fetch-llama-cpp.sh 拉取，不入库）
+third_party/
+
+# 本地模型与知识库（运行期产生，勿提交）
+*.gguf
+localmind_knowledge.db
+
+# IDE
+.idea/
+*.iml
+local.properties

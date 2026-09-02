@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">LocalMind</string>
+    <string name="api_service_label">LocalMind 本地 AI API</string>
+</resources>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 本地 HTTP 服务需要监听端口 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 前台服务保活模型推理 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 13+ 显示通知 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 声明支持 64 位（骁龙）与 x86_64（模拟器） -->
+    <uses-feature android:name="android.hardware.ram.large" android:required="false" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="false" />
+
+    <application
+        android:name=".LocalMindApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="LocalMind"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LocalMind"
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="LocalMind"
+            android:theme="@style/Theme.LocalMind">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 对外 API 服务：导出以便其他 App 绑定 -->
+        <service
+            android:name=".LocalMindApiService"
+            android:exported="true"
+            android:enabled="true"
+            android:foregroundServiceType="dataSync" />
+
+    </application>
+
+</manifest>
