@@ -39,7 +39,11 @@ data class ScoredChunk(
 )
 
 class KnowledgeDb private constructor(context: Context) :
-    SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+    io.requery.android.database.sqlite.SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+
+    // FTS 模块可用性。捆绑 SQLite 通常含 FTS5；极少数变体或 ROM 只支持 FTS4 时降级。
+    @Volatile
+    private var hasFts5: Boolean = true
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -69,16 +73,49 @@ class KnowledgeDb private constructor(context: Context) :
         db.execSQL("CREATE INDEX idx_chunk_doc ON chunk(doc_id)")
 
         // 索引用的内容单独存一份预处理后的 token 串（见 toFtsTokens 的说明）
-        db.execSQL(
-            """
-            CREATE VIRTUAL TABLE chunk_fts USING fts5(
-                content,
-                chunk_id UNINDEXED,
-                doc_id   UNINDEXED,
-                tokenize = 'unicode61 remove_diacritics 2'
+        // FTS5 优先（BM25 排序）；若当前 SQLite 未编译 FTS5，自动降级 FTS4。
+        hasFts5 = detectFts5(db)
+        if (hasFts5) {
+            db.execSQL(
+                """
+                CREATE VIRTUAL TABLE chunk_fts USING fts5(
+                    content,
+                    chunk_id UNINDEXED,
+                    doc_id   UNINDEXED,
+                    tokenize = 'unicode61 remove_diacritics 2'
+                )
+                """.trimIndent()
             )
-            """.trimIndent()
-        )
+        } else {
+            db.execSQL(
+                """
+                CREATE VIRTUAL TABLE chunk_fts USING fts4(
+                    content,
+                    chunk_id,
+                    doc_id,
+                    notindexed=chunk_id,
+                    notindexed=doc_id,
+                    tokenize=unicode61
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    // 探测当前 SQLite 是否编译了 FTS5（PRAGMA compile_options 含 ENABLE_FTS5）
+    private fun detectFts5(db: SQLiteDatabase): Boolean {
+        return try {
+            var ok = false
+            db.rawQuery("PRAGMA compile_options", null).use { c ->
+                while (c.moveToNext()) {
+                    val opt = c.getString(0)
+                    if (opt != null && opt.contains("ENABLE_FTS5")) { ok = true; break }
+                }
+            }
+            ok
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
@@ -175,7 +212,8 @@ class KnowledgeDb private constructor(context: Context) :
         if (terms.isEmpty()) return emptyList()
         val match = terms.joinToString(" OR ") { "\"$it\"" }
 
-        val sql = """
+        val sql = if (hasFts5) {
+            """
             SELECT c.id AS cid, c.doc_id, c.idx, c.content, d.title,
                    bm25(chunk_fts) AS score
             FROM chunk_fts f
@@ -184,7 +222,20 @@ class KnowledgeDb private constructor(context: Context) :
             WHERE chunk_fts MATCH ?
             ORDER BY score ASC
             LIMIT ?
-        """.trimIndent()
+            """.trimIndent()
+        } else {
+            // FTS4 无 bm25()：按 chunk id 顺序返回，score 恒 0（调用方按 -score 越大越相关）
+            """
+            SELECT c.id AS cid, c.doc_id, c.idx, c.content, d.title,
+                   0.0 AS score
+            FROM chunk_fts f
+            JOIN chunk c ON c.id = f.chunk_id
+            JOIN document d ON d.id = c.doc_id
+            WHERE chunk_fts MATCH ?
+            ORDER BY c.id ASC
+            LIMIT ?
+            """.trimIndent()
+        }
 
         val out = mutableListOf<ScoredChunk>()
         readableDatabase.rawQuery(sql, arrayOf(match, limit.toString())).use { c ->

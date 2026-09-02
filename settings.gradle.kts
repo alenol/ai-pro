@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // 捆绑 SQLite（io.requery:sqlite-android，内置 FTS5）托管在 jitpack
+        maven(url = "https://jitpack.io")
     }
 }
 
