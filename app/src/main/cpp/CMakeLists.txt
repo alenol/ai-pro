@@ -71,6 +71,37 @@ set(GGML_OPENCL_TARGET_VERSION      300 CACHE STRING "" FORCE)
 # 需要 Qualcomm QNN SDK 且需单独接受许可，开启方式见 docs/SNAPDRAGON.md。
 set(GGML_QNN OFF CACHE BOOL "" FORCE)
 
+
+# ==========================================================================
+# OpenCL 头文件与库（Android / CI 适配）
+#
+# llama.cpp 的 ggml-opencl 后端执行 find_package(OpenCL REQUIRED)，
+# 而 FindOpenCL 默认只搜桌面标准路径，在 Android NDK 环境下找不到：
+#   - 头文件：CI 工作流已预下载 Khronos OpenCL-Headers（OPENCL_HEADERS_DIR），
+#     否则回退到 NDK sysroot 自带的 CL/ 头（若存在）。
+#   - 库：链接 NDK platforms 下的 libOpenCL.so stub；
+#     运行时由设备系统（Adreno）加载真正的 /system/lib64/libOpenCL.so。
+# ==========================================================================
+if(DEFINED ENV{OPENCL_HEADERS_DIR})
+    if(EXISTS "$ENV{OPENCL_HEADERS_DIR}/CL/cl.h")
+        set(OpenCL_INCLUDE_DIR "$ENV{OPENCL_HEADERS_DIR}")
+    endif()
+elseif(DEFINED ANDROID_NDK AND EXISTS "${ANDROID_NDK}/sysroot/usr/include/CL/cl.h")
+    set(OpenCL_INCLUDE_DIR "${ANDROID_NDK}/sysroot/usr/include")
+endif()
+if(DEFINED ANDROID_NDK)
+    file(GLOB _lm_ocl_libs
+        "${ANDROID_NDK}/platforms/android-*/arch-${ANDROID_ABI}/usr/lib/libOpenCL.so")
+    if(_lm_ocl_libs)
+        list(GET _lm_ocl_libs 0 OpenCL_LIBRARY)
+    endif()
+    unset(_lm_ocl_libs)
+endif()
+set(OpenCL_INCLUDE_DIR "${OpenCL_INCLUDE_DIR}" CACHE PATH "OpenCL headers dir" FORCE)
+set(OpenCL_LIBRARY     "${OpenCL_LIBRARY}"     CACHE FILEPATH "OpenCL stub lib" FORCE)
+message(STATUS "LocalMind OpenCL_INCLUDE_DIR=${OpenCL_INCLUDE_DIR}")
+message(STATUS "LocalMind OpenCL_LIBRARY=${OpenCL_LIBRARY}")
+
 add_subdirectory(${LLAMA_SRC} build-llama)
 
 # ==========================================================================
