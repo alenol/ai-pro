@@ -1,0 +1,177 @@
+# LocalMind —— 编译 arm64 Release APK（带详细日志版）
+#
+# 说明：这是"排障/取日志"专用工作流，与原 build-release.yml 并存。
+#   1) 原工作流保持不变（push/tag/手动触发，默认关闭文件日志）。
+#   2) 本工作流仅手动触发，构建时传 -Plocalmind.debugLog=true，
+#      使 APK 默认开启详细日志输出到 Download/localmodel/ 目录，
+#      无需 adb，可直接在手机文件管理器里读取日志（含崩溃堆栈）。
+#   3) 产物以 -debuglog 命名，避免与正式包混淆。
+#
+# 产物：app/build/outputs/apk/release/app-arm64-v8a-debuglog-release.apk
+#   日志：安装运行后，日志写在 公共下载目录 Download/localmodel/ 下，
+#         文件名为 localmind_yyyyMMdd_HHmmss.log
+#
+# 签名（任选其一，不配置也能产出可安装的签名 APK）：
+#   方式 A（推荐，稳定密钥）：在仓库 Settings → Secrets 中添加
+#     SIGNING_KEY        base64 编码的 .jks 文件内容（echo -n "$(base64 release.jks)"）
+#     KEYSTORE_PASSWORD  密钥库密码
+#     KEY_ALIAS          别名
+#     KEY_PASSWORD       Key 密码
+#   方式 B（无密钥）：工作流自动用 keytool 生成一次性密钥库，保证 APK 已签名可安装；
+#     但该密钥每次运行都不同，正式对外发布请用方式 A。
+
+name: Build Release APK (arm64, debug logs)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-release-debuglog-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # 发布 tag 时创建 GitHub Release
+  actions: read
+
+jobs:
+  build:
+    name: Build arm64 debug-log APK
+    runs-on: ubuntu-latest        # 4 vCPU / 16 GB RAM
+    timeout-minutes: 120
+    env:
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # 安装 SDK cmdline-tools 并自动接受许可协议，再装所需组件
+      - name: Install Android SDK, NDK 27, CMake
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platforms;android-35
+            build-tools;35.0.0
+            ndk;27.0.12077973
+            cmake;3.22.1
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-debuglog-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-debuglog-${{ runner.os }}-
+
+      # 准备签名密钥库：有 SIGNING_KEY 则用，否则用 keytool 生成一次性密钥库
+      - name: Prepare signing keystore
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: |
+          mkdir -p "$HOME/keystore"
+          STORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
+          KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
+          KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+          [ -z "$STORE_PASS" ] && STORE_PASS="localmind"
+          [ -z "$KEY_ALIAS" ]  && KEY_ALIAS="localmind"
+          [ -z "$KEY_PASS" ]   && KEY_PASS="localmind"
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "$SIGNING_KEY" | base64 -d > "$HOME/keystore/release.jks"
+          else
+            keytool -genkeypair -v \
+              -keystore "$HOME/keystore/release.jks" \
+              -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$STORE_PASS" -keypass "$KEY_PASS" \
+              -dname "CN=LocalMind"
+          fi
+          {
+            echo "LM_SIGN_STORE_FILE=$HOME/keystore/release.jks"
+            echo "LM_SIGN_STORE_PASSWORD=$STORE_PASS"
+            echo "LM_SIGN_KEY_ALIAS=$KEY_ALIAS"
+            echo "LM_SIGN_KEY_PASSWORD=$KEY_PASS"
+          } >> "$GITHUB_ENV"
+
+      # 拉取 llama.cpp 源码到 third_party/（CMake 通过相对路径引用）
+      - name: Fetch llama.cpp (third_party)
+        run: bash ./scripts/fetch-llama-cpp.sh
+
+      # 下载 Khronos OpenCL-Headers（ggml-opencl 后端 find_package(OpenCL) 需要），
+      # 并从头文件提取全部 cl* 函数名，编译一个导出符号的空 stub libOpenCL.so 供链接。
+      # 该 stub 只骗过链接器；APK 不打包它，运行时由设备系统（Adreno）的
+      # /system/lib64/libOpenCL.so 解析（DT_NEEDED=libOpenCL.so）。
+      - name: Install OpenCL headers and build symbol stub (Khronos)
+        run: |
+          set -euo pipefail
+          HDRS="$ANDROID_SDK_ROOT/opencl-headers"
+          curl -fsSL https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/heads/main.tar.gz -o /tmp/opencl-headers.tar.gz
+          rm -rf "$HDRS"
+          mkdir -p "$HDRS"
+          tar -xzf /tmp/opencl-headers.tar.gz -C "$HDRS" --strip-components=1
+          echo "OPENCL_HEADERS_DIR=$HDRS" >> "$GITHUB_ENV"
+          ls -l "$HDRS/CL/cl.h"
+          # 提取 OpenCL API 函数名（cl 后接大写字母的标识符），生成空实现 stub 源文件
+          cd "$HDRS"
+          python3 - <<'PY'
+          import re, glob
+          names = set()
+          for h in glob.glob("CL/*.h"):
+              text = open(h, encoding="utf-8", errors="ignore").read()
+              names.update(m.group(1) for m in re.finditer(r"\b(cl[A-Z][A-Za-z0-9_]*)\s*\(", text))
+          with open("opencl_stub.c", "w") as f:
+              for n in sorted(names):
+                  f.write('__attribute__((visibility("default"))) void *%s(void) { return 0; }\n' % n)
+          print("stubbed %d symbols" % len(names))
+          PY
+          NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
+          CLANG="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          "$CLANG" -shared -fPIC -O1 -Wl,-soname,libOpenCL.so -o "$ANDROID_SDK_ROOT/libOpenCL.so" "$HDRS/opencl_stub.c"
+          echo "OPENCL_LIBRARY=$ANDROID_SDK_ROOT/libOpenCL.so" >> "$GITHUB_ENV"
+          ls -l "$ANDROID_SDK_ROOT/libOpenCL.so"
+
+      # 在 4 vCPU / 16 GB 限制下收一收 Gradle 内存与并发，避免 OOM
+      - name: Tune Gradle for 4 vCPU / 16 GB
+        run: |
+          {
+            echo "org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8"
+            echo "org.gradle.workers.max=3"
+          } >> gradle.properties
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # 只编 arm64-v8a release；开启 -Plocalmind.debugLog=true（默认详细日志写 Download/localmodel/）
+      - name: Build release APK (arm64, debug logs)
+        run: gradle :app:assembleRelease -Plocalmind.arm64Only=true -Plocalmind.debugLog=true --no-daemon
+
+      - name: Rename APK (debuglog marker)
+        run: |
+          ls -lh app/build/outputs/apk/release/
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mv "$APK" app/build/outputs/apk/release/app-arm64-v8a-debuglog-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalMind-arm64-release-debuglog
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
